@@ -1,3 +1,4 @@
+<<<<<< HEAD
 # TSU to Playwright Converter
 
 A small full-stack app that lets a user upload a `.tsu` file, send it to a backend powered by Claude, and download a zip containing a structured Playwright project bundle.
