@@ -1,4 +1,3 @@
-<<<<<< HEAD
 # TSU to Playwright Converter
 
 A small full-stack app that lets a user upload a `.tsu` file, send it to a backend powered by Claude, and download a zip containing a structured Playwright project bundle.
@@ -24,6 +23,12 @@ A small full-stack app that lets a user upload a `.tsu` file, send it to a backe
 ## Hosting
 
 For production, keep the Claude key only on the backend host.
+
+Render setup:
+- Root Directory: `backend`
+- Build Command: `pip install -r requirements.txt`
+- Start Command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+- Python runtime is pinned in `backend/runtime.txt` to avoid the Python 3.14 `pydantic-core` build issue.
 
 Backend environment variables:
 - `ANTHROPIC_API_KEY` - required
