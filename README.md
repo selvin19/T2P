@@ -28,7 +28,7 @@ Render setup:
 - Root Directory: `backend`
 - Build Command: `pip install -r requirements.txt`
 - Start Command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-- Python runtime is pinned in `backend/runtime.txt` to avoid the Python 3.14 `pydantic-core` build issue.
+- Python runtime is pinned in repo-root `.python-version` and mirrored in `backend/runtime.txt` to avoid the Python 3.14 `pydantic-core` build issue.
 
 Backend environment variables:
 - `ANTHROPIC_API_KEY` - required
