@@ -1,0 +1,136 @@
+Need2know
+
+Project Overview
+This project is a full-stack web app that converts uploaded .tsu files into downloadable, Tosca-aware Playwright project bundles using Claude.
+
+Main Stack
+- Frontend: React + TypeScript + Vite
+- Backend: Python + FastAPI
+- AI provider: Claude through the Anthropic SDK
+
+High-Level Flow
+1. The user opens the React app in the browser.
+2. The backend stores the Claude API key in its environment.
+3. The user uploads or drags in a .tsu file.
+4. The React app sends only the file to the backend.
+5. The backend reads the .tsu content and builds a prompt for Claude.
+6. The backend calls Claude through the Anthropic Python SDK.
+7. Claude returns a structured JSON bundle with page objects, test data, config, and tests.
+8. The backend writes each generated file into a zip archive.
+9. The backend streams the zip back to the browser.
+10. The React app creates a download link for the zip.
+
+Frontend Details
+Location: frontend/src/App.tsx
+- Manages UI state for selected file, drag state, conversion status, and download result.
+- Sends a multipart/form-data request to POST /convert.
+- Uses fetch() to receive the zip file as a blob.
+- Creates a browser object URL so the user can download the zip.
+
+Frontend UI Features
+- File upload zone with drag-and-drop support.
+- Convert button.
+- Converted file download area.
+- Status message centered in the hero section.
+
+Frontend Styling
+Location: frontend/src/styles.css
+- Dark gradient background with card-style panels.
+- Centered hero message.
+- Highlight state for drag-and-drop upload.
+- Responsive 2-column layout that collapses on smaller screens.
+
+Backend Details
+Location: backend/app/main.py
+- FastAPI app named TSU to Playwright Converter.
+- CORS enabled for localhost:5173 by default.
+- Health check route: GET /health
+- Conversion route: POST /convert
+
+Backend /convert Route Behavior
+- Accepts a file upload named file.
+- Rejects files that do not end with .tsu.
+- Reads the uploaded file as UTF-8 text with replacement for invalid bytes.
+- Uses ANTHROPIC_API_KEY from the environment.
+- Builds a prompt that instructs Claude to output JSON only.
+- Calls Claude in a worker thread using anyio.to_thread.run_sync so the event loop is not blocked.
+- Parses Claude’s JSON into a structured bundle.
+- Creates a zip archive containing:
+  - tests/example.spec.ts or a similar spec file
+  - pages/*.ts page object files when Claude provides them
+  - data/*.ts test data files when Claude provides them
+  - playwright.config.ts when Claude provides it
+  - README.md and README.txt notes
+- Returns the zip as an application/zip StreamingResponse.
+
+Claude Integration Details
+- Python SDK package: anthropic
+- Client: Anthropic(api_key=...)
+- Model default: claude-3-5-sonnet-20241022
+- Max tokens: 3000
+- Message format: a single user prompt containing the .tsu input and the structured JSON conversion instructions
+
+Important Environment Variables
+- ANTHROPIC_API_KEY: required backend secret used by Claude
+- ANTHROPIC_MODEL: optional override for the Claude model
+- CORS_ORIGINS: comma-separated list of allowed frontend origins
+- VITE_API_BASE_URL: frontend base URL for the backend API
+- The Claude API key is server-side only in hosted mode.
+
+Dependencies
+Backend requirements file: backend/requirements.txt
+- fastapi
+- uvicorn[standard]
+- python-multipart
+- anthropic
+- pydantic
+
+Runtime Ports
+- Frontend dev server: http://localhost:5173
+- Backend API server: http://127.0.0.1:8000
+
+How to Run
+Backend:
+1. cd backend
+2. python -m venv .venv
+3. source .venv/Scripts/activate or use the Windows shell equivalent
+4. python -m pip install -r requirements.txt
+5. uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+Frontend:
+1. cd frontend
+2. npm install
+3. npm run dev
+
+How to Check It
+- Open the frontend in the browser.
+- Upload a .tsu file.
+- Click Convert.
+- Download the generated zip when it appears.
+- Open http://127.0.0.1:8000/health to verify the backend is running.
+
+Hosting Notes
+- Frontend can be deployed as a static site.
+- Backend must expose the FastAPI app and keep ANTHROPIC_API_KEY on the server.
+- Set VITE_API_BASE_URL to the public backend URL in production.
+- Set CORS_ORIGINS to the deployed frontend origin.
+- The current frontend production build passes after adding Node typings and switching TypeScript module resolution to Bundler.
+
+Implementation Notes
+- The app expects the uploaded file to be text-like .tsu content.
+- The conversion prompt is intentionally strict so Claude returns a structured project bundle.
+- The output is now closer to Tosca POM and data separation because the bundle can include page objects and test data files.
+
+Files of Interest
+- README: README.md
+- Frontend app: frontend/src/App.tsx
+- Frontend styles: frontend/src/styles.css
+- Backend app: backend/app/main.py
+- Backend dependencies: backend/requirements.txt
+
+Potential Next Improvements
+- Add file validation before upload.
+- Add a progress spinner during conversion.
+- Save generated zip names based on the input file name.
+- Add tests for the /convert route.
+- Add stricter JSON schema validation and fallback recovery for Claude responses.

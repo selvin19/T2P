@@ -1,0 +1,151 @@
+from __future__ import annotations
+
+import json
+import io
+import os
+import re
+import zipfile
+from typing import Annotated
+
+import anyio
+from anthropic import Anthropic
+from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+
+app = FastAPI(title="TSU to Playwright Converter")
+
+cors_origins = [origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",") if origin.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins or ["http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+class HealthResponse(BaseModel):
+    status: str
+
+
+class ConvertResult(BaseModel):
+    filename: str
+
+
+class BundleFile(BaseModel):
+    path: str
+    content: str
+
+
+class BundleResponse(BaseModel):
+    project_name: str
+    files: list[BundleFile]
+
+
+def _clean_filename(name: str) -> str:
+    base = os.path.splitext(os.path.basename(name))[0]
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", base).strip("-._")
+    return safe or "converted"
+
+
+def _build_prompt(tsu_content: str) -> str:
+    return f"""You are an expert test automation engineer.
+Convert the following .tsu file into a structured Playwright project bundle that preserves Tosca-style page object modeling and data separation.
+Requirements:
+- Output JSON only. Do not wrap the response in markdown fences.
+- Follow this schema exactly:
+  {{
+    "project_name": string,
+    "files": [
+      {{"path": "tests/example.spec.ts", "content": string}},
+      {{"path": "pages/example-page.ts", "content": string}},
+      {{"path": "data/test-data.ts", "content": string}},
+      {{"path": "playwright.config.ts", "content": string}},
+      {{"path": "README.md", "content": string}}
+    ]
+  }}
+- If the Tosca source suggests page objects, create them in pages/.
+- If the Tosca source contains test data, place it in data/.
+- Keep test logic in tests/ and reuse page objects rather than duplicating flows.
+- Preserve Tosca-like structure, naming, and configuration intent as closely as possible.
+- Include useful Playwright assertions and keep the project ready to run.
+- If the input is incomplete, infer the most likely structure from the content.
+
+.tsu input:
+{tsu_content}
+"""
+
+
+def _extract_json_blob(text: str) -> str:
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if not match:
+        raise ValueError("Claude did not return JSON")
+    return match.group(0)
+
+
+def _normalize_bundle_response(raw_text: str) -> BundleResponse:
+    payload = json.loads(_extract_json_blob(raw_text))
+    return BundleResponse.model_validate(payload)
+
+
+def _generate_project_bundle(api_key: str, prompt: str) -> BundleResponse:
+    client = Anthropic(api_key=api_key)
+    response = client.messages.create(
+        model=os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022"),
+        max_tokens=3000,
+        messages=[{"role": "user", "content": prompt}],
+    )
+
+    pieces = [part.text for part in response.content if getattr(part, "type", None) == "text"]
+    raw_text = "\n".join(pieces).strip()
+    if not raw_text:
+        raise ValueError("Claude returned an empty response")
+    return _normalize_bundle_response(raw_text)
+
+
+@app.get("/health", response_model=HealthResponse)
+def health() -> HealthResponse:
+    return HealthResponse(status="ok")
+
+
+@app.post("/convert")
+async def convert(
+    file: Annotated[UploadFile, File(...)],
+) -> StreamingResponse:
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="A .tsu file is required")
+    if not file.filename.lower().endswith(".tsu"):
+        raise HTTPException(status_code=400, detail="Only .tsu files are supported")
+
+    raw_content = await file.read()
+    tsu_content = raw_content.decode("utf-8", errors="replace")
+    key = os.getenv("ANTHROPIC_API_KEY", "").strip()
+    if not key:
+        raise HTTPException(status_code=500, detail="Server Claude API key is not configured")
+
+    prompt = _build_prompt(tsu_content)
+    try:
+        bundle = await anyio.to_thread.run_sync(_generate_project_bundle, key, prompt)
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=502, detail=f"Claude returned an invalid bundle: {exc}") from exc
+
+    safe_name = _clean_filename(file.filename)
+    zip_name = f"{safe_name}-playwright-project.zip"
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for item in bundle.files:
+            normalized_path = item.path.strip().lstrip("/\\")
+            if not normalized_path:
+                continue
+            archive.writestr(normalized_path, item.content.rstrip() + "\n")
+        archive.writestr(
+            "README.txt",
+            "Generated by TSU to Playwright Converter.\nOpen the tests/ folder to run the Playwright suite.\n",
+        )
+    buffer.seek(0)
+
+    headers = {"Content-Disposition": f'attachment; filename="{zip_name}"'}
+    return StreamingResponse(buffer, media_type="application/zip", headers=headers)
