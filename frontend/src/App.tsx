@@ -11,6 +11,9 @@ export default function App() {
   const [downloadName, setDownloadName] = useState('');
   const [status, setStatus] = useState<ConvertState>('idle');
   const [message, setMessage] = useState('Upload a .tsu file to generate a structured Playwright project bundle.');
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [apiKey, setApiKey] = useState('');
+  const [savedApiKey, setSavedApiKey] = useState('');
 
   useEffect(() => {
     return () => {
@@ -20,7 +23,21 @@ export default function App() {
     };
   }, [downloadUrl]);
 
-  const canConvert = useMemo(() => Boolean(selectedFile), [selectedFile]);
+  const canConvert = useMemo(() => Boolean(selectedFile && savedApiKey), [selectedFile, savedApiKey]);
+
+  const toggleDrawer = () => {
+    setIsDrawerOpen(!isDrawerOpen);
+  };
+
+  const handleSaveApiKey = () => {
+    if (!apiKey.trim()) {
+      window.alert('Please enter a valid API key');
+      return;
+    }
+    setSavedApiKey(apiKey.trim());
+    setIsDrawerOpen(false);
+    setMessage('API key saved. Upload a .tsu file to continue.');
+  };
 
   const showUploadError = () => {
     window.alert('Tosca file upload pannu da venna...');
@@ -77,12 +94,20 @@ export default function App() {
       return;
     }
 
+    if (!savedApiKey) {
+      setStatus('error');
+      setMessage('Please set your API key first.');
+      setIsDrawerOpen(true);
+      return;
+    }
+
     setStatus('uploading');
     setMessage('Converting with Claude...');
 
     try {
       const formData = new FormData();
       formData.append('file', selectedFile);
+      formData.append('api_key', savedApiKey);
 
       const response = await fetch(`${API_BASE_URL}/convert`, {
         method: 'POST',
@@ -116,6 +141,42 @@ export default function App() {
 
   return (
     <div className="app-shell">
+      <button className="api-button" type="button" onClick={toggleDrawer}>
+        {savedApiKey ? '🔑 API Key Set' : '🔑 Set API Key'}
+      </button>
+
+      <div className={`drawer ${isDrawerOpen ? 'open' : ''}`}>
+        <div className="drawer-header">
+          <h2>API Key</h2>
+          <button className="icon-button" type="button" onClick={toggleDrawer}>
+            ✕
+          </button>
+        </div>
+        <p className="drawer-copy">
+          Enter your Anthropic API key to enable conversion. The key will be sent securely to the backend.
+        </p>
+        <div className="field">
+          <label htmlFor="api-key-input">
+            <strong>API Key</strong>
+          </label>
+          <input
+            id="api-key-input"
+            type="password"
+            placeholder="sk-ant-..."
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                handleSaveApiKey();
+              }
+            }}
+          />
+        </div>
+        <button className="secondary-button" type="button" onClick={handleSaveApiKey}>
+          Save API Key
+        </button>
+      </div>
+
       <main className="hero-card">
         <div className="hero-copy">
           <p className="eyebrow">Tosca 2 Playwright</p>

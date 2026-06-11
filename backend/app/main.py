@@ -9,17 +9,17 @@ from typing import Annotated
 
 import anyio
 from anthropic import Anthropic
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 app = FastAPI(title="TSU to Playwright Converter")
 
-cors_origins = [origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",") if origin.strip()]
+cors_origins = [origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:5174").split(",") if origin.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=cors_origins or ["http://localhost:5173"],
+    allow_origins=cors_origins or ["http://localhost:5173", "http://localhost:5174"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -113,6 +113,7 @@ def health() -> HealthResponse:
 @app.post("/convert")
 async def convert(
     file: Annotated[UploadFile, File(...)],
+    api_key: Annotated[str, Form()] = "",
 ) -> StreamingResponse:
     if not file.filename:
         raise HTTPException(status_code=400, detail="A .tsu file is required")
@@ -121,9 +122,11 @@ async def convert(
 
     raw_content = await file.read()
     tsu_content = raw_content.decode("utf-8", errors="replace")
-    key = os.getenv("ANTHROPIC_API_KEY", "").strip()
+    
+    # Try to get API key from request first, then fall back to environment variable
+    key = api_key.strip() if api_key else os.getenv("ANTHROPIC_API_KEY", "").strip()
     if not key:
-        raise HTTPException(status_code=500, detail="Server Claude API key is not configured")
+        raise HTTPException(status_code=400, detail="API key is required. Please provide it in the request or set ANTHROPIC_API_KEY environment variable.")
 
     prompt = _build_prompt(tsu_content)
     try:
